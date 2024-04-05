@@ -27,8 +27,8 @@ enum Token {
     tok_identifier = -4,
     tok_number = -5,
 
-    tok_repeat = -6,
-    tok_until = -7
+    tok_repeat = -6,  // 'repeat'
+    tok_until = -7    // 'until'
 };
 
 static std::string IdentifierStr; // Filled in if tok_identifier
@@ -47,10 +47,10 @@ static int gettok() {
         while (isalnum((LastChar = getchar())))
             IdentifierStr += LastChar;
 
-        if (IdentifierStr == "def")
-            return tok_def;
-        if (IdentifierStr == "extern")
-            return tok_extern;
+        if (IdentifierStr == "def") return tok_def;
+        if (IdentifierStr == "extern") return tok_extern;
+        if (IdentifierStr == "repeat") return tok_repeat;  // recognize 'repeat'
+        if (IdentifierStr == "until") return tok_until;    // recognize 'until'
         return tok_identifier;
     }
 
@@ -79,7 +79,7 @@ static int gettok() {
     if (LastChar == EOF)
         return tok_eof;
 
-      // Otherwise, just return the character as its ascii value.
+    // Otherwise, just return the character as its ascii value.
     int ThisChar = LastChar;
     LastChar = getchar();
     return ThisChar;
@@ -92,58 +92,76 @@ static int gettok() {
 namespace {
     /// ExprAST - Base class for all expression nodes.
     class ExprAST {
-        public:
-            virtual ~ExprAST() = default;
+    public:
+        virtual ~ExprAST() = default;
     };
 
     /// NumberExprAST - Expression class for numeric literals like "1.0".
     class NumberExprAST : public ExprAST {
-            double Val;
-        public:
-            NumberExprAST(double Val) : Val(Val) {}
+        double Val;
+    public:
+        NumberExprAST(double Val) : Val(Val) {}
     };
 
     /// VariableExprAST - Expression class for referencing a variable, like "a".
     class VariableExprAST : public ExprAST {
-            std::string Name;
-        public:
-            VariableExprAST(const std::string &Name) : Name(Name) {}
+        std::string Name;
+    public:
+        VariableExprAST(const std::string &Name) : Name(Name) {}
     };
 
     /// BinaryExprAST - Expression class for a binary operator.
     class BinaryExprAST : public ExprAST {
-            char Op;
-            std::unique_ptr<ExprAST> LHS, RHS;
-        public:
-            BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS, std::unique_ptr<ExprAST> RHS): Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
+        char Op;
+        std::unique_ptr<ExprAST> LHS, RHS;
+
+    public:
+        BinaryExprAST(char Op, std::unique_ptr<ExprAST> LHS,
+                    std::unique_ptr<ExprAST> RHS)
+            : Op(Op), LHS(std::move(LHS)), RHS(std::move(RHS)) {}
     };
 
     /// CallExprAST - Expression class for function calls.
     class CallExprAST : public ExprAST {
-            std::string Callee;
-            std::vector<std::unique_ptr<ExprAST>> Args;
-        public:
-            CallExprAST(const std::string &Callee,std::vector<std::unique_ptr<ExprAST>> Args) : Callee(Callee), Args(std::move(Args)) {}
+        std::string Callee;
+        std::vector<std::unique_ptr<ExprAST>> Args;
+    public:
+        CallExprAST(const std::string &Callee,
+                    std::vector<std::unique_ptr<ExprAST>> Args)
+            : Callee(Callee), Args(std::move(Args)) {}
     };
 
     /// PrototypeAST - This class represents the "prototype" for a function,
     /// which captures its name, and its argument names (thus implicitly the number
     /// of arguments the function takes).
     class PrototypeAST {
-            std::string Name;
-            std::vector<std::string> Args;
-        public:
-            PrototypeAST(const std::string &Name, std::vector<std::string> Args) : Name(Name), Args(std::move(Args)) {}
-            const std::string &getName() const { return Name; }
+        std::string Name;
+        std::vector<std::string> Args;
+
+    public:
+        PrototypeAST(const std::string &Name, std::vector<std::string> Args)
+            : Name(Name), Args(std::move(Args)) {}
+
+        const std::string &getName() const { return Name; }
     };
 
     /// FunctionAST - This class represents a function definition itself.
     class FunctionAST {
-            std::unique_ptr<PrototypeAST> Proto;
-            std::unique_ptr<ExprAST> Body;
+        std::unique_ptr<PrototypeAST> Proto;
+        std::unique_ptr<ExprAST> Body;
 
-        public:
-            FunctionAST(std::unique_ptr<PrototypeAST> Proto, std::unique_ptr<ExprAST> Body) : Proto(std::move(Proto)), Body(std::move(Body)) {}
+    public:
+        FunctionAST(std::unique_ptr<PrototypeAST> Proto,
+                    std::unique_ptr<ExprAST> Body)
+            : Proto(std::move(Proto)), Body(std::move(Body)) {}
+    };
+
+    class RepeatUntilExprAST : public ExprAST {
+        std::unique_ptr<ExprAST> Body, Condition;
+
+    public:
+        RepeatUntilExprAST(std::unique_ptr<ExprAST> Body, std::unique_ptr<ExprAST> Condition)
+            : Body(std::move(Body)), Condition(std::move(Condition)) {}
     };
 } // end anonymous namespace
 
@@ -166,10 +184,9 @@ static int GetTokPrecedence() {
     if (!isascii(CurTok))
         return -1;
 
-    // Make sure it's a declared binop.
+// Make sure it's a declared binop.
     int TokPrec = BinopPrecedence[CurTok];
-    if (TokPrec <= 0)
-        return -1;
+    if (TokPrec <= 0) return -1;
     return TokPrec;
 }
 
@@ -211,7 +228,7 @@ static std::unique_ptr<ExprAST> ParseParenExpr() {
 ///   ::= identifier '(' expression* ')'
 static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
     std::string IdName = IdentifierStr;
-    getNextToken(); // eat identifier.
+getNextToken(); // eat identifier.
     if (CurTok != '(') // Simple variable ref.
         return std::make_unique<VariableExprAST>(IdName);
 
@@ -234,26 +251,56 @@ static std::unique_ptr<ExprAST> ParseIdentifierExpr() {
         }
     }
 
-    // Eat the ')'.
     getNextToken();
 
     return std::make_unique<CallExprAST>(IdName, std::move(Args));
 }
 
-/// primary
-///   ::= identifierexpr
-///   ::= numberexpr
-///   ::= parenexpr
+
+static std::unique_ptr<ExprAST> ParseRepeatUntilExpr() {
+    getNextToken(); // eat 'repeat'
+
+    auto Body = ParseExpression();
+    if (!Body)
+        return nullptr;
+
+    if (CurTok != tok_until)
+        return LogError("expected 'until'");
+    getNextToken(); // eat 'until'
+
+    // Condition can be with or without parentheses.
+    bool hasParentheses = (CurTok == '(');
+    if (hasParentheses) {
+        getNextToken(); // eat '('
+    }
+
+    auto Condition = ParseExpression();
+    if (!Condition)
+        return nullptr;
+
+    if (hasParentheses) {
+        if (CurTok != ')')
+            return LogError("expected ')' after condition");
+        getNextToken(); // eat ')'
+    }
+    
+    // returning the successfully parsed expression:
+    fprintf(stderr, "Parsed a repeat-until expr\n");
+    return std::make_unique<RepeatUntilExprAST>(std::move(Body), std::move(Condition));
+}
+
 static std::unique_ptr<ExprAST> ParsePrimary() {
     switch (CurTok) {
-        default:
-            return LogError("unknown token when expecting an expression");
-        case tok_identifier:
-            return ParseIdentifierExpr();
-        case tok_number:
-            return ParseNumberExpr();
-        case '(':
-            return ParseParenExpr();
+    default:
+        return LogError("unknown token when expecting an expression");
+    case tok_identifier:
+        return ParseIdentifierExpr();
+    case tok_number:
+        return ParseNumberExpr();
+    case '(':
+        return ParseParenExpr();
+    case tok_repeat:
+        return ParseRepeatUntilExpr(); // Parse repeat-until here
     }
 }
 
@@ -390,20 +437,20 @@ static void MainLoop() {
     while (true) {
         fprintf(stderr, "ready> ");
         switch (CurTok) {
-            case tok_eof:
-                return;
-            case ';': // ignore top-level semicolons.
-                getNextToken();
-                break;
-            case tok_def:
-                HandleDefinition();
-                break;
-            case tok_extern:
-                HandleExtern();
-                break;
-            default:
-                HandleTopLevelExpression();
-                break;
+        case tok_eof:
+            return;
+        case ';': // ignore top-level semicolons.
+            getNextToken();
+            break;
+        case tok_def:
+            HandleDefinition();
+            break;
+        case tok_extern:
+            HandleExtern();
+            break;
+        default:
+            HandleTopLevelExpression();
+            break;
         }
     }
 }
@@ -413,18 +460,18 @@ static void MainLoop() {
 //===----------------------------------------------------------------------===//
 
 int main() {
-    // Install standard binary operators.
+// Install standard binary operators.
     // 1 is lowest precedence.
     BinopPrecedence['<'] = 10;
     BinopPrecedence['+'] = 20;
     BinopPrecedence['-'] = 20;
     BinopPrecedence['*'] = 40; // highest.
 
-    // Prime the first token.
+// Prime the first token.
     fprintf(stderr, "ready> ");
     getNextToken();
 
-    // Run the main "interpreter loop" now.
+// Run the main "interpreter loop" now.
     MainLoop();
 
     return 0;
